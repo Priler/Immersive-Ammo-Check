@@ -1,5 +1,5 @@
 # Immersive ammo check for Stalker GAMMA
-Heavily inspired by FUSION: https://www.youtube.com/watch?v=VPEJEBxYJqw (sorry haruka for basically stealing the idea)
+Heavily inspired by FUSION: [https://www.youtube.com/watch?v=VPEJEBxYJqw](https://youtu.be/VPEJEBxYJqw?t=95) (sorry haruka for basically stealing the idea)
 REQUIRES GAMMA (or ammo check and mag check)
 
 ## Installation for GAMMA: 
