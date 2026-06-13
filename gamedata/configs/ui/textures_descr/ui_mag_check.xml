@@ -1,0 +1,8 @@
+<w>
+	<file name="ui\white_screen_of_death">
+		<texture id="white_empty_box"	x="0"	y="0"	width="174"	height="60" />
+		
+		<texture id="white_filled_box"	x="174"	y="0"	width="174"	height="60" />
+	</file>
+  
+</w>

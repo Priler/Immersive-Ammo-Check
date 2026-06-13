@@ -1,0 +1,24 @@
+<w>
+	<background width="200" height="60" stretch="1">
+		<text font = "letterica18" align = "c" width = "200" height = "60" />
+	</background>
+	<cover_bar width="200" height="8" horz="1" min="0" max="1" pos="0" stretch="1">
+		<progress>
+			<texture>ui_inGame2_Patroni_HUD_gold_bar</texture>
+		</progress>
+	</cover_bar>
+	<cover_bar_bg width="200" height="8">
+			<texture>ui_inGame2_Patroni_HUD_gold_bar</texture>
+	</cover_bar_bg>
+	
+	<bar x="0" y="0" width="70" height="20" horz="1" min="0" max="1" pos="1" stretch="0" inertion = "-100" > <!-- yeah turns out inertion isnt a range from 0-1 it can go to the negatives 
+	and still speed up !
+	-->
+		<background width="27" height="3" stretch="1">
+			<texture r="255" g="255" b="255" a = "100" >white_empty_box</texture>
+		</background>
+		<progress stretch="1">
+			<texture r="255" g="255" b="255" a = "100" >white_filled_box</texture>
+		</progress>
+	</bar>
+</w>

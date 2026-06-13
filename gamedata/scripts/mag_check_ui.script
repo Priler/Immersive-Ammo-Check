@@ -1,0 +1,554 @@
+-- verdatim. Attempt to imitate HarukaSai's fusion mag check ui script. that hasnt been released yet as of date of creation of this script
+-- credits to Haruka for the idea !
+
+-- going to include all my funny commented stuff / mistakes
+
+HUD = nil
+
+class "MyHUD" (CUIScriptWnd)	-- 1
+
+function MyHUD:__init() super() -- 2
+	self:InitControls()
+end
+
+function MyHUD:InitControls()
+	self:SetWndRect(Frect():set(0,0, 1024, 768)) -- sets corner positions (left, top, right, bottom) of the dialog window
+	self:SetAutoDelete(true)
+	
+	self.xml = CScriptXmlInit()
+	local xml = self.xml -- just so you don't have to write 'self.xml' every time
+	xml:ParseFile("mag_check_ui.xml")
+	
+	self.my_wnd = xml:InitStatic("background", self)
+	
+	self.my_text = xml:InitTextWnd("background:text", self.my_wnd)
+	
+	--xml:ParseFile("utils.xml")
+	
+	-- most of this progress bar stuff is from dynamic emission cover so thanks a lot to them!
+	
+	self.progress_bar = xml:InitProgressBar("bar", self.my_wnd)
+	--local bar_color = GetARGB(255,255,200,200)
+	--self.progress_bar:SetColor(bar_color)
+	--self.my_text:SetText("My text here")
+	
+	self.cover_bar_bg = xml:InitStatic("bar", self.my_wnd)
+	--local bg_color = GetARGB(75,55,55,55)
+	--self.cover_bar_bg:SetTextureColor(bg_color)
+	
+	self.my_wnd:Show(false)
+	self.my_text:Show(false)
+	self.cover_bar_bg:Show(false)
+	self.progress_bar:Show(false)
+	
+	self.my_wnd:Enable(false)
+	self.my_text:Enable(false)
+end
+
+function MyHUD:__finalize()	-- 3
+	-- your code (optional)
+end
+
+function MyHUD:Update()		-- 4
+	CUIScriptWnd.Update(self)
+	-- your code
+end
+
+function show_hud()
+	if HUD == nil then
+		HUD = MyHUD() -- calls instance of your HUD class
+	end
+	
+	if HUD and not HUD:IsShown() then
+		get_hud():AddDialogToRender(HUD) -- renders HUD on screen
+		--Register_UI("MyHUD", "my_script_name", HUD)
+	end
+end
+
+function close_hud()
+	if HUD and HUD:IsShown() then
+		get_hud():RemoveDialogToRender(HUD)
+		--Unregister_UI("MyHUD")
+		HUD = nil -- optional, destroys HUD instance
+	end
+end
+
+local ammo_check_start_time
+
+local delay_til_ui_show = 500
+
+function actor_on_hud_animation_play(anim_table, obj)
+	first_hud_mag_pos = nil
+	first_hud_mag_rot = nil
+	if string.find(anim_table.anm_name, "ammo_check") then
+		--printf("showing hud")
+		ammo_check_start_time = time_global()
+		show_hud()
+	else
+		--printf("hiding hud")
+		close_hud()
+	end
+end
+
+animation_common.add_anim_mutator(actor_on_hud_animation_play, 100)
+
+function on_game_start()
+	--RegisterScriptCallback("on_key_press", on_key_press)
+	RegisterScriptCallback("actor_on_update", actor_on_update)
+	
+	if not animation_common then
+		RegisterScriptCallback("actor_on_hud_animation_play", actor_on_hud_animation_play)
+	end
+end
+
+local UpdateTimer = 0
+-- unit is milliseconds
+local UpdateFreq = 10
+
+-- entries mentioned later in the list have higher priority due to how ipairs works
+magazine_bone_names = {
+"wpn_mag", "wpn_magazine", "mag", "magazin", "magazine", "shell_tube"
+}
+
+bullet_in_magazine_names = {
+"bullet_4", "bullet", "bullets", "bullet2", "wpn_bullet_1", "bullets1", "bullets2", "wpn_magazine_bullet_2", "bullet_3", "shell_2", "shell_tube"
+}
+
+
+function actor_on_update()
+	--printf("hud is %s", HUD)
+	if HUD and HUD:IsShown() then
+		local tg = time_global()
+		--printf("%s, %s", tg, UpdateTimer)
+		if (tg < UpdateTimer) then
+			return
+		else
+			UpdateTimer = tg + UpdateFreq
+		end
+		if tg < ammo_check_start_time + delay_til_ui_show then
+			return
+		end
+		local wpn = db.actor:active_item()
+		local wpn_sec = wpn and wpn:section()
+		local wpn_cast = wpn and wpn:is_weapon() and wpn:cast_Weapon()
+		if not wpn_cast then return end
+		local ammo_type = wpn_cast:GetAmmoType()
+		local ammo_types = {}
+		wpn_cast:AmmoTypeForEach(function(i, ammo_sec)
+			ammo_types[i] = ammo_sec
+		end)
+		ammo_type = ammo_types[ammo_type] or 0
+		local ammo_str_name = ini_sys:r_string_ex(ammo_type, "inv_name_short")
+		if ammo_str_name then
+			ammo_str_name = game.translate_string(ammo_str_name)
+		else
+			ammo_str_name = ammo_type
+		end
+		local curr_ammo_count = wpn_cast:GetAmmoElapsed() or 0
+		local max_ammo_count = wpn_cast:GetAmmoMagSize() or 30
+		if magazines then
+			if magazine_binder.is_supported_weapon(wpn_sec) then
+				local mag_data = magazine_binder.get_mag_loaded(wpn:id())
+				if mag_data then
+					max_ammo_count = SYS_GetParam(2, mag_data.section, "max_mag_size")
+				end
+			end
+		end
+		
+		local text = string.format("%s/%s %s", curr_ammo_count, max_ammo_count, ammo_str_name)
+		
+		self = HUD
+		if not self then return end
+		
+		local progress = clamp(curr_ammo_count / max_ammo_count, 0, 1)
+		
+		-- time to find the position for the mag bone or bullet bone
+		if curr_ammo_count == 0 then
+			for i, name in ipairs(magazine_bone_names) do
+				local mag_bone = wpn:get_bone_id(name, true)
+				--printf("mag_bone is %s, name is %s", mag_bone, name)
+				-- 65535 is the fallback value of bone name cannot be found
+				if mag_bone ~= 65535 then
+					local temp = wpn:bone_position(mag_bone, true)
+					-- local temp_r = wpn:bone_direction(mag_bone, true)
+					if temp then
+						printf("mag bone is %s", name)
+						hud_mag_pos = temp
+						-- hud_mag_rot = temp_r
+					end
+				end
+			end
+		else
+			for i, name in ipairs(bullet_in_magazine_names) do
+				local mag_bone = wpn:get_bone_id(name, true)
+				--printf("mag_bone is %s, name is %s", mag_bone, name)
+				-- 65535 is the fallback value of bone name cannot be found
+				if mag_bone ~= 65535 then
+					local temp = wpn:bone_position(mag_bone, true)
+					-- local temp_r = wpn:bone_direction(mag_bone, true)
+					if temp then
+						printf("mag bone is %s", name)
+						hud_mag_pos = temp
+						-- hud_mag_rot = temp_r
+					end
+				end
+			end
+		end
+		
+		if ini_sys:r_string_ex(wpn_sec, "mag_check_ui_mag_bone") then
+			if curr_ammo_count ~= 0 then
+				local mag_bone = ini_sys:r_string_ex(wpn_sec, "mag_check_ui_mag_bone")
+				hud_mag_pos = wpn:bone_position(mag_bone, true)
+				printf("mag bone is %s", mag_bone)
+			else
+				local mag_bone = ini_sys:r_string_ex(wpn_sec, "mag_check_ui_mag_bone_empty")
+				hud_mag_pos = wpn:bone_position(mag_bone, true)
+				printf("mag bone is %s", mag_bone)
+			end
+		end
+		
+		-- the grot has a special system for some reason, howa is the same
+		if string.find(wpn_sec, "wpn_grot") or string.find(wpn_sec, "wpn_howa20") then
+			if curr_ammo_count < 8 then
+				local mag_bone = "mag"
+				hud_mag_pos = wpn:bone_position(mag_bone, true)
+			end
+		end
+		
+		if not hud_mag_pos then 
+			fallback(self, text, progress)
+			return
+		end
+		
+		-- if not first_hud_mag_rot then
+			-- first_hud_mag_rot = hud_mag_rot
+		-- end
+		
+		--printf("tried to set text to %s", text)
+		
+		--printf("hud_mag_rot is %s", hud_mag_rot)
+
+		self.my_text:SetText(text)
+
+		-- converting hud bone position to world and then into ui
+		local world_mag_pos = hud_mag_pos:hud_to_world()
+		--local y_offset = vector():set(0, 0.06, 0)
+		
+		--local rotation_adjustment = vector():sub(hud_mag_rot, first_hud_mag_rot)
+		
+		-- mad stands for multiply and add, basically just moves a vector from a point in a direction for a certain distance
+		-- local offset_dir = vector():set(0,0,0)
+		-- offset_dir = vector_rotate_y(offset_dir, 
+		
+		--world_mag_pos = vector():mad(world_mag_pos, rotation_adjustment, y_offset)
+		--world_mag_pos = vector():add(world_mag_pos,y_offset)
+		local ui_mag_pos = game.world2ui(hud_mag_pos, false, true)
+		
+		--printf("original ui_pos is %s", ui_mag_pos)
+		
+		if ui_mag_pos.x > 1024 then
+			ui_mag_pos.x = 1024
+		end
+		if ui_mag_pos.x < 0 then
+			ui_mag_pos.x = 0
+		end
+		if ui_mag_pos.y > 743 then
+			ui_mag_pos.y = 743
+		end
+		if ui_mag_pos.y < 10 then
+			ui_mag_pos.y = 10
+		end
+		
+		--printf("clamped ui_pos is %s", ui_mag_pos)
+		
+		ui_mag_pos = vector2():set(ui_mag_pos.x - 40, ui_mag_pos.y - 10)
+		
+		ui_mag_pos_bar = vector2():set(ui_mag_pos.x, ui_mag_pos.y + 20)
+		
+		--printf("ui_mag_pos is %s", ui_mag_pos)
+		
+		self.cover_bar_bg:SetWndPos(ui_mag_pos)
+		self.cover_bar_bg:Show(true)
+		
+		self.progress_bar:SetWndPos(ui_mag_pos)
+		self.progress_bar:SetProgressPos(progress)
+		--printf("progress bar is at %s, progress is %s", self.progress_bar:GetProgressPos(), progress)
+		self.progress_bar:Show(true)
+		
+		self.my_text:SetWndPos(ui_mag_pos_bar)
+		self.my_wnd:Show(true)
+		
+		self.my_text:Show(true)
+		
+		ui_mag_pos = nil
+		hud_mag_pos = nil
+		
+		-- just making sure it still works
+		--actor_menu.set_msg(1, "heyheyheyheyhey", 2)
+	end
+end
+
+function fallback(self, text, progress)
+	local pos = vector2():set(500, 600)
+	--printf("pos is %s", pos)
+	self.my_text:SetWndPos(pos)
+	self.my_text:SetText(text)
+	
+	local new_pos = vector2():set(pos.x, pos.y - 20)
+	
+	self.cover_bar_bg:SetWndPos(new_pos)
+	self.cover_bar_bg:Show(true)
+	self.progress_bar:SetWndPos(new_pos)
+	self.progress_bar:SetProgressPos(progress)
+	--printf("progress bar is at %s, progress is %s", self.progress_bar:GetProgressPos(), progress)
+	self.progress_bar:Show(true)
+	self.my_wnd:Show(true)
+	self.my_text:Show(true)
+end
+
+-- function on_key_press(key)
+	-- printf("key pressed is %s", key)
+	-- if key == DIK_keys.DIK_COMMA then
+		-- printf("tried to show hud")
+		-- show_hud()
+		-- CreateTimeEvent("st", "sttt", 5, function()
+			-- close_hud()
+			-- return true
+		-- end)
+	-- end
+	-- if key == DIK_keys.DIK_DECIMAL then
+		-- printf("tried to close hud")
+		-- close_hud()
+	-- end
+-- end
+
+-- disabling ammo check message unless there isnt an animation
+
+-- ammo_check_mcm.actor_menu = tbl
+
+original_ammo_check = ammo_check_mcm.check_Ammo
+
+ammo_check_mcm.check_Ammo = function()
+	local wpn = db.actor:active_item()
+	original_ammo_check()
+	if not (wpn and wpn:is_weapon()) then return end
+	if animation_common.has_animation(wpn:section(), "anm_ammo_check") then
+		RemoveTimeEvent("ammo_check", "restore Weapon")
+		RemoveTimeEvent("ammo_check", "message delay")
+	end
+end
+
+
+
+-- heres my first (very bad) attempt at making a ui
+-- turns out its NOT the same as an interactable gui which i knew how to make
+
+--[=[
+
+class "MagCheckUI" (CUIScriptWnd)
+
+function MagCheckUI:__init(xmlfile,element,texture,pos) super()
+    self:InitControls(xmlfile,element,texture,pos)
+    RegisterScriptCallback("actor_on_net_destroy", self)
+	
+	self:Show(true)
+	self:Enable(true)
+	
+	self.xml = CScriptXmlInit()
+	local xml = self.xml
+	xml:ParseFile("mag_check_ui.xml")
+	
+	xml:InitWindow("mag_check_ui", 0, self)
+	
+	self.window = xml:InitStatic("mag_check_ui:background", self)
+	
+	self.window_text = xml:InitTextWnd("mag_check_ui:background:text", self.window)
+	
+end
+
+-- alot of this is from NERFS. Many thanks to Catspaw
+
+function MagCheckUI:InitControls(xmlfile,element,texture,pos)
+    self.pos = pos or {x=491,y=670}
+    self:SetAutoDelete(true)
+    self.xml        = CScriptXmlInit()
+    self.xml:ParseFile(xmlfile or "mag_check_ui.xml")
+    self.background  = self.xml:InitStatic(element or "mag_check_ui:background",self)
+    self.text  = self.xml:InitTextWnd("mag_check_ui:background:text", self.background)
+    -- if texture then self.text:InitTexture(texture) end
+	self.text:SetText("texttexttext")
+    self.background:SetWndPos(vector2():set(self.pos.x, self.pos.y))
+    --self.background:EnableHeading(true)
+	self.background:Show(true)
+    --self.text:EnableHeading(true)
+    --self.text:SetConstHeading(true)
+    self.text:Show(true)
+    self:ShowMagText(true)
+end
+
+function MagCheckUI:ShowMagText(onoff)
+	self.text:Show(onoff)
+end
+
+function MagCheckUI:__finalize() 
+end
+
+--[[
+local UpdateTimer = 0
+-- unit is milliseconds
+local UpdateFreq = 100
+
+function MagCheckUI:Update()
+	CUIScriptWnd.Update(self)
+	
+	printf("updating")
+	
+	local tg = time_global()
+	
+	--printf("%s, %s", tg, UpdateTimer)
+	
+	if (tg < UpdateTimer) then
+		return
+	else
+		UpdateTimer = tg + UpdateFreq
+	end
+	printf("mag_check_ui update")
+
+	local wpn = db.actor:active_item()
+	--local wpn_sec = wpn and wpn:section()
+	local wpn_cast = wpn and wpn:is_weapon() and wpn:cast_Weapon()
+	if not wpn_cast then return end
+	local ammo_type = wpn_cast:GetAmmoType()
+	local ammo_types = {}
+	wpn_cast:AmmoTypeForEach(function(i, ammo_sec)
+		ammo_types[i] = ammo_sec
+	end)
+	ammo_type = ammo_types[ammo_type] or 0
+	local ammo_str_name = ini_sys:r_string_ex(ammo_type, "inv_name_short")
+	if ammo_str_name then
+		ammo_str_name = game.translate_string(ammo_str_name)
+	else
+		ammo_str_name = ammo_type
+	end
+	local curr_ammo_count = wpn_cast:GetAmmoElapsed() or 0
+	local max_ammo_count = wpn_cast:GetAmmoMagSize() or 30
+	local text = string.format("%s/%s %s", curr_ammo_count, max_ammo_count, ammo_str_name)
+	
+	printf("tried to set text to %s", text)
+	
+	-- local mag_pos = wpn:bone_position("magazin", true)
+	-- printf("mag_pos is %s", mag_pos)
+	
+	self.window_text:SetText(text)
+	
+	-- time to find the position for the mag bone
+	local hud_mag_pos = wpn:bone_position("magazin", true)
+	local world_mag_pos = hud_mag_pos:hud_to_world()
+	local ui_mag_pos = game.world2ui(world_mag_pos, false, false)
+	
+	printf("set ui_pos to %s", ui_mag_pos)
+	
+	self.window_text:SetWndPos(ui_mag_pos)
+	
+	self.window_text:Show(true)
+end
+]]
+
+local update = 100
+local timer = 0
+
+function actor_on_update()
+	local tg = time_global()
+	if (tg < timer) then
+		return
+	else
+		timer = tg + update
+	end
+	local wpn = db.actor:active_item()
+	--local wpn_sec = wpn and wpn:section()
+	local wpn_cast = wpn and wpn:is_weapon() and wpn:cast_Weapon()
+	if not wpn_cast then return end
+	local ammo_type = wpn_cast:GetAmmoType()
+	local ammo_types = {}
+	wpn_cast:AmmoTypeForEach(function(i, ammo_sec)
+		ammo_types[i] = ammo_sec
+	end)
+	ammo_type = ammo_types[ammo_type] or 0
+	local ammo_str_name = ini_sys:r_string_ex(ammo_type, "inv_name_short")
+	if ammo_str_name then
+		ammo_str_name = game.translate_string(ammo_str_name)
+	else
+		ammo_str_name = ammo_type
+	end
+	local curr_ammo_count = wpn_cast:GetAmmoElapsed() or 0
+	local max_ammo_count = wpn_cast:GetAmmoMagSize() or 30
+	local text = string.format("%s/%s %s", curr_ammo_count, max_ammo_count, ammo_str_name)
+	
+	self = HUD
+	if not false then return end
+	
+	printf("tried to set text to %s", text)
+	
+	-- local mag_pos = wpn:bone_position("magazin", true)
+	-- printf("mag_pos is %s", mag_pos)
+	
+	
+	self.window_text:SetText(text)
+	
+	-- time to find the position for the mag bone
+	local hud_mag_pos = wpn:bone_position("magazin", true)
+	local world_mag_pos = hud_mag_pos:hud_to_world()
+	local ui_mag_pos = game.world2ui(world_mag_pos, false, false)
+	
+	printf("set ui_pos to %s", ui_mag_pos)
+	
+	self.window_text:SetWndPos(ui_mag_pos)
+end
+
+HUD = nil
+
+function show_hud()
+	if HUD == nil then
+		HUD = MagCheckUI() -- calls instance of your HUD class
+	end
+	
+	if HUD and not HUD:IsShown() then
+		get_hud():AddDialogToRender(HUD) -- renders HUD on screen
+		Register_UI("MagCheckUI", "mag_check_ui", HUD)
+	end
+	return HUD
+end
+
+
+function close_hud()
+	if HUD and HUD:IsShown() then
+		get_hud():RemoveDialogToRender(HUD)
+		Unregister_UI("MagCheckUI")
+		HUD = nil -- optional, destroys HUD instance
+	end
+end
+
+function check_for_mag_check_anim(anim_table, obj)
+	if string.find(anim_table.anm_name, "ammo_check") then
+		printf("showing hud")
+		show_hud()
+	else
+		printf("hiding hud")
+		close_hud()
+	end
+end
+
+if animation_common then
+	animation_common.add_anim_mutator(check_for_mag_check_anim, 100)
+end
+
+function on_game_start()
+	if not animation_common then
+		RegisterScriptCallback("actor_on_hud_animation_play", check_for_mag_check_anim)
+	end
+	RegisterScriptCallback("actor_on_net_destroy", close_hud)
+	
+	RegisterScriptCallback("actor_on_update", actor_on_update)
+end
+
+]=]
