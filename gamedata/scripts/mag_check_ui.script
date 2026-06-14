@@ -108,11 +108,11 @@ local UpdateFreq = 10
 
 -- entries mentioned later in the list have higher priority due to how ipairs works
 magazine_bone_names = {
-"wpn_mag", "wpn_magazine", "mag", "magazin", "magazine", "shell_tube"
+"wpn_mag", "wpn_magazine", "wpn_magazin", "mag", "magazin", "magazine", "mag_1", "magazin_1", "wpn_mag_1", "pmag", "clip", "shell_tube"
 }
 
 bullet_in_magazine_names = {
-"bullet_4", "bullet", "bullets", "bullet2", "wpn_bullet_1", "bullets1", "bullets2", "wpn_magazine_bullet_2", "bullet_3", "shell_2", "shell_tube"
+"bullet_4", "bullet_3", "bullet_2", "bullet_1", "bullet", "bullets", "bullet1", "bullet2", "wpn_bullet", "wpn_bullet_1", "wpn_bullet_2", "bullets1", "bullets2", "wpn_magazine_bullet_2", "shell_2", "shell_tube"
 }
 
 
@@ -164,37 +164,23 @@ function actor_on_update()
 		
 		local progress = clamp(curr_ammo_count / max_ammo_count, 0, 1)
 
-		-- time to find the position for the mag bone or bullet bone
-		if curr_ammo_count == 0 then
-			for i, name in ipairs(magazine_bone_names) do
+		-- time to find the position for the mag bone (when empty) or the top round bone (when loaded).
+		-- search the most relevant list first, then fall back to the other - some anims (e.g. bore for PM pistol)
+		-- expose only a mag bone and no per-round bone, so a loaded one would otherwise find nothing
+		local primary = (curr_ammo_count == 0) and magazine_bone_names or bullet_in_magazine_names
+		local secondary = (curr_ammo_count == 0) and bullet_in_magazine_names or magazine_bone_names
+		for _, bone_list in ipairs({primary, secondary}) do
+			for i, name in ipairs(bone_list) do
 				local mag_bone = wpn:get_bone_id(name, true)
-				--printf("mag_bone is %s, name is %s", mag_bone, name)
 				-- 65535 is the fallback value of bone name cannot be found
 				if mag_bone ~= 65535 then
 					local temp = wpn:bone_position(mag_bone, true)
-					-- local temp_r = wpn:bone_direction(mag_bone, true)
 					if temp then
-						printf("mag bone is %s", name)
 						hud_mag_pos = temp
-						-- hud_mag_rot = temp_r
 					end
 				end
 			end
-		else
-			for i, name in ipairs(bullet_in_magazine_names) do
-				local mag_bone = wpn:get_bone_id(name, true)
-				--printf("mag_bone is %s, name is %s", mag_bone, name)
-				-- 65535 is the fallback value of bone name cannot be found
-				if mag_bone ~= 65535 then
-					local temp = wpn:bone_position(mag_bone, true)
-					-- local temp_r = wpn:bone_direction(mag_bone, true)
-					if temp then
-						printf("mag bone is %s", name)
-						hud_mag_pos = temp
-						-- hud_mag_rot = temp_r
-					end
-				end
-			end
+			if hud_mag_pos then break end
 		end
 		
 		if ini_sys:r_string_ex(wpn_sec, "mag_check_ui_mag_bone") then
